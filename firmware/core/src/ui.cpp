@@ -198,7 +198,10 @@ EdgeRing edge_ring(const UiModel& m) {
   }
   switch (m.screen) {
     case Screen::Listening:
-        case Screen::Thinking:
+    case Screen::Ready:
+      if (m.animate) comet(60, kCyan, kCyanDim);
+      break;
+    case Screen::Thinking:
       if (m.animate) comet(60, kMagenta, kMagentaDim);
       break;
     case Screen::Responding:
@@ -1870,71 +1873,116 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
   const HeroGeom g = hero_geom(m);
   const int size = g.size, mx = g.x, my = g.y;
   const mascot::Anchors& a = mascot::anchors(m.face);
-  // Cerchio CooralAI a primitive geometriche (statico in Ready, pulsante negli stati attivi)
-  uint16_t core_col = kCyan, ring_col = kCyanDim;
-  const int bcx = mx + size / 2;
-  const int bcy = my + size / 2;
-  const int max_r = std::min(size, 144) / 2;
-  int r_core = max_r * 42 / 100;
-  int r_ring_in = max_r * 58 / 100;
-  int r_ring_out = max_r * 64 / 100;
+// Bolla polare CooralAI con LUT 64x64 (zero sqrt/sin per pixel, < 1 ms a frame)
+  static uint8_t dist_lut[64][64];
+  static uint8_t ang_lut[64][64];
+  static bool lut_ready = false;
+  if (!lut_ready) {
+    for (int y = 0; y < 64; ++y) {
+      for (int x = 0; x < 64; ++x) {
+        const double d = std::sqrt(static_cast<double>(x * x + y * y));
+        dist_lut[y][x] = static_cast<uint8_t>(std::min(255.0, d + 0.5));
+        const double a = (x == 0 && y == 0) ? 0.0 : std::atan2(static_cast<double>(y), static_cast<double>(x));
+        ang_lut[y][x] = static_cast<uint8_t>((a * 64.0 / 3.14159265358979323846) + 0.5);
+      }
+    }
+    lut_ready = true;
+  }
 
+  static constexpr int8_t kSin128[128] = {
+       0,   6,  12,  19,  25,  31,  37,  43,  49,  54,  60,  65,  71,  76,  81,  85,
+      90,  94,  98, 102, 106, 109, 112, 115, 117, 120, 122, 123, 125, 126, 126, 127,
+     127, 127, 126, 126, 125, 123, 122, 120, 117, 115, 112, 109, 106, 102,  98,  94,
+      90,  85,  81,  76,  71,  65,  60,  54,  49,  43,  37,  31,  25,  19,  12,   6,
+       0,  -6, -12, -19, -25, -31, -37, -43, -49, -54, -60, -65, -71, -76, -81, -85,
+     -90, -94, -98,-102,-106,-109,-112,-115,-117,-120,-122,-123,-125,-126,-126,-127,
+    -127,-127,-126,-126,-125,-123,-122,-120,-117,-115,-112,-109,-106,-102, -98, -94,
+     -90, -85, -81, -76, -71, -65, -60, -54, -49, -43, -37, -31, -25, -19, -12,  -6,
+  };
+
+  uint8_t c_fg[3] = {0, 229, 255};  // Ciano (Ready / Listening)
+  int amp_pct = 11, speed = 3;
   switch (m.screen) {
-    case Screen::Ready:
-      core_col = kCyan;
-      ring_col = kCyanDim;
+    case Screen::Listening:
+      c_fg[0] = 0; c_fg[1] = 229; c_fg[2] = 255;
+      amp_pct = 14 + (std::clamp<int>(m.level, 0, 100) * 24) / 100;
+      speed = 7;
       break;
-
-    case Screen::Listening: {
-      core_col = kCyan;
-      ring_col = kCyanDim;
-      const int lvl = std::clamp<int>(m.level, 0, 100);
-      const int boost = (max_r * 32 * lvl) / 10000;
-      r_core += boost / 2;
-      r_ring_in = r_core + std::max(4, max_r / 10) + boost;
-      r_ring_out = r_ring_in + std::max(3, max_r / 16);
+    case Screen::Thinking:
+      c_fg[0] = 255; c_fg[1] = 46; c_fg[2] = 196;  // Magenta
+      amp_pct = 22;
+      speed = 9;
       break;
-    }
-
-    case Screen::Thinking: {
-      core_col = kMagenta;
-      ring_col = kMagentaDim;
-      const int pulse = m.animate ? tri(m.frame, 10) : 5;
-      r_core += (max_r * pulse) / 90;
-      r_ring_in = r_core + std::max(5, max_r / 9) + (max_r * pulse) / 45;
-      r_ring_out = r_ring_in + std::max(3, max_r / 14);
+    case Screen::Responding:
+      c_fg[0] = 255; c_fg[1] = 138; c_fg[2] = 0;   // Arancione
+      amp_pct = m.speaking ? (20 + tri(m.frame, 6) * 4) : 12;
+      speed = m.speaking ? 8 : 4;
       break;
-    }
-
-    case Screen::Responding: {
-      core_col = kOrange;
-      ring_col = kOrangeDim;
-      const int pulse = (m.animate && m.speaking) ? tri(m.frame, 6) : 2;
-      r_core += (max_r * pulse) / 65;
-      r_ring_in = r_core + std::max(5, max_r / 9) + (max_r * pulse) / 35;
-      r_ring_out = r_ring_in + std::max(3, max_r / 14);
-      break;
-    }
-
     case Screen::Offline:
     case Screen::Error:
-      core_col = rgb565(220, 60, 60);
-      ring_col = rgb565(90, 22, 22);
+      c_fg[0] = 242; c_fg[1] = 75; c_fg[2] = 75;   // Rosso
+      amp_pct = 7;
+      speed = 2;
       break;
-
     default:
-      core_col = kOrange;
-      ring_col = kOrangeDim;
       break;
   }
 
-  r_ring_out = std::min(r_ring_out, max_r);
-  r_ring_in = std::min(r_ring_in, r_ring_out - 2);
-  r_core = std::min(r_core, r_ring_in - 3);
+  // Rampa colore continua a 32 livelli: 0..19 interno (nucleo luminoso -> membrana), 20..31 alone esterno
+  uint8_t c_bg[3];
+  channels(bg_, c_bg);
+  uint16_t ramp[32];
+  for (int i = 0; i < 20; ++i) {
+    const int inv = 19 - i;
+    const int lift = (inv * inv * 95) / (19 * 19);  // 0..95 luce morbida al centro
+    const uint8_t r = static_cast<uint8_t>(c_fg[0] + (((255 - c_fg[0]) * lift) >> 8));
+    const uint8_t g_col = static_cast<uint8_t>(c_fg[1] + (((255 - c_fg[1]) * lift) >> 8));
+    const uint8_t b_col = static_cast<uint8_t>(c_fg[2] + (((255 - c_fg[2]) * lift) >> 8));
+    ramp[i] = rgb565(r, g_col, b_col);
+  }
+  for (int i = 0; i < 12; ++i) {
+    const int rem = 12 - i;
+    const int a = (rem * rem * 220) / (12 * 12);  // decadimento quadratico morbido sul nero AMOLED
+    const uint8_t r = static_cast<uint8_t>((c_fg[0] * a + c_bg[0] * (256 - a)) >> 8);
+    const uint8_t g_col = static_cast<uint8_t>((c_fg[1] * a + c_bg[1] * (256 - a)) >> 8);
+    const uint8_t b_col = static_cast<uint8_t>((c_fg[2] * a + c_bg[2] * (256 - a)) >> 8);
+    ramp[20 + i] = rgb565(r, g_col, b_col);
+  }
 
-  c.fill_circle(bcx, bcy, r_ring_out, ring_col);
-  c.fill_circle(bcx, bcy, r_ring_in, bg_);
-  c.fill_circle(bcx, bcy, r_core, core_col);
+  // Profilo polare su 128 angoli
+  const int base_r = std::min(size, 144) * 26 / 100;  // ~37 px
+  const uint32_t f = m.animate ? m.frame : 0u;
+  const int ph1 = static_cast<int>(f * speed);
+  const int ph2 = static_cast<int>(f * (speed * 2 / 3 + 1));
+  const int ph3 = static_cast<int>(f * (speed / 2 + 1));
+  uint8_t r_surf[128];
+  for (int i = 0; i < 128; ++i) {
+    const int w = (kSin128[(i * 3 + ph1) & 127] * 5 +
+                   kSin128[(i * 5 - ph2) & 127] * 3 +
+                   kSin128[(i * 2 + ph3) & 127] * 2) / 10;
+    r_surf[i] = static_cast<uint8_t>(std::clamp(base_r + (base_r * amp_pct * w) / (100 * 127), 12, 48));
+  }
+
+  const int bcx = mx + size / 2;
+  const int bcy = my + size / 2;
+  constexpr int kGlowPx = 14;
+
+  for (int dy = -63; dy <= 63; ++dy) {
+    const int ay = dy < 0 ? -dy : dy;
+    for (int dx = -63; dx <= 63; ++dx) {
+      const int ax = dx < 0 ? -dx : dx;
+      const uint8_t d = dist_lut[ay][ax];
+      if (d >= 48 + kGlowPx) continue;
+      const uint8_t q = ang_lut[ay][ax];
+      const uint8_t ang = (dx >= 0) ? (dy >= 0 ? q : static_cast<uint8_t>((128 - q) & 127))
+                                    : (dy >= 0 ? static_cast<uint8_t>(64 - q) : static_cast<uint8_t>(64 + q));
+      const int rs = r_surf[ang];
+      if (d >= rs + kGlowPx) continue;
+      const int idx = (d <= rs) ? (rs > 0 ? (d * 19) / rs : 19)
+                                : (20 + ((d - rs - 1) * 11) / (kGlowPx - 1));
+      c.pixel(bcx + dx, bcy + dy, ramp[idx]);
+    }
+  }
   
   if (expression(m) != mascot::Expression::Neutral) draw_mark(c, m, mark_rect(g, a));
 
