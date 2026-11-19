@@ -156,6 +156,8 @@ BoardConfig make() {
   b.imu.x_from = 1; b.imu.y_from = 0; b.imu.z_from = 2;
   b.imu.x_sign = 1; b.imu.y_sign = 1; b.imu.z_sign = -1;
   b.rtc.enabled = true;  // PCF85063A at 0x51 on the same bus keeps UTC across power loss
+  b.codec.mic_gain_db = 30.0f;
+  b.codec.vad_min_rms = 90.0f;
 #endif
 #if CONFIG_HG_BOARD_AMOLED_175C
   b.amoled.rst = 1;

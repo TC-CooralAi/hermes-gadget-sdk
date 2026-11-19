@@ -3161,7 +3161,7 @@ void App::update_model() {
     m.screen = Screen::Responding;
     // In interpreter mode the label stays while the translation is spoken: it names who speaks
     // next, and that person may answer before the speech has ended.
-    m.headline = interpret_ ? interpret_label_.c_str() : m.speaking ? tr(Msg::Speaking) : "Hermes";
+    m.headline = interpret_ ? interpret_label_.c_str() : m.speaking ? tr(Msg::Speaking) : name_;
     m.detail = status_;
     m.body = reply_;
     m.hint = profile_.touch_screen && touch_talk_ ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});
