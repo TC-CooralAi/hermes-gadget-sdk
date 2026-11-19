@@ -15,6 +15,7 @@ set(HG_CORE_SOURCES
     src/font_cjk_data.cpp
     src/i18n.cpp
     src/i18n_es.cpp
+    src/i18n_it.cpp
     src/frame_stats.cpp
     src/json.cpp
     src/mascot.cpp

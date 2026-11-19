@@ -738,7 +738,11 @@ class App {
   void set_dozing(bool dozing);
   // Face-down sleep. Stamps are 0 until set (now() | 1 keeps 0 meaning "none").
   int16_t motion_[3] = {0, 0, 0};
+  int16_t prev_motion_[3] = {0, 0, 0};
   uint32_t motion_at_ = 0, down_since_ = 0, up_since_ = 0;
+  uint32_t shake_window_at_ = 0, shake_cooldown_until_ = 0;
+  uint8_t shake_hits_ = 0;
+  bool shake_triggered_ = false;
   bool motion_seen_ = false, face_down_ = false;
   bool face_down_sleep_ = false;      // the `face_down_sleep` setting
   bool touch_wake_ = true;            // the `touch_wake` setting

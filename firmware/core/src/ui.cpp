@@ -27,6 +27,12 @@ constexpr uint16_t kGreenDim = rgb565(28, 92, 62);
 constexpr uint16_t kBlueDim = rgb565(52, 96, 140);
 constexpr uint16_t kAccentDim = rgb565(110, 82, 30);
 constexpr uint16_t kRedDim = rgb565(122, 44, 44);
+constexpr uint16_t kCyan = rgb565(0, 229, 255);
+constexpr uint16_t kCyanDim = rgb565(0, 115, 128);
+constexpr uint16_t kMagenta = rgb565(255, 46, 196);
+constexpr uint16_t kMagentaDim = rgb565(128, 23, 98);
+constexpr uint16_t kOrange = rgb565(255, 138, 0);
+constexpr uint16_t kOrangeDim = rgb565(128, 69, 0);
 
 class Hash {
  public:
@@ -158,10 +164,11 @@ EdgeRing edge_ring(const UiModel& m) {
     r.colour = colour;
     r.dim = dim;
   };
-  const auto comet = [&r, &m](uint32_t lap, uint16_t colour) {
+  const auto comet = [&r, &m](uint32_t lap, uint16_t colour, uint16_t track) {
     r.kind = EdgeRing::Kind::Comet;
     r.colour = colour;
-    r.head = static_cast<uint16_t>(m.frame % lap * 360 / lap);
+    r.track = track;
+    r.head = static_cast<uint16_t>((m.frame % lap) * 360 / lap);
   };
   switch (m.screen) {
     case Screen::Alarm:
@@ -172,20 +179,13 @@ EdgeRing edge_ring(const UiModel& m) {
       return r;
     case Screen::Clock:
       r.kind = EdgeRing::Kind::Ticks;
-      r.colour = kAccent;
+      r.colour = kOrange;
       r.second = static_cast<uint8_t>(m.clock_second % 60);
       r.turn64 = static_cast<int16_t>(burn_in_shift(shift_step(m)).dx * kTickTurn64);
       return r;
-    case Screen::Listening:
-      if (m.progress_permille >= 0) {
-        const bool late = m.progress_permille >= kLateListening;
-        level(m.progress_permille, late ? kAccent : kGreen, late ? kAccentDim : kGreenDim);
-        return r;
-      }
-      break;
     case Screen::Updating:
       if (m.progress_permille >= 0) {
-        level(m.progress_permille, kAccent, kAccentDim);
+        level(m.progress_permille, kOrange, kOrangeDim);
         return r;
       }
       break;
@@ -193,17 +193,21 @@ EdgeRing edge_ring(const UiModel& m) {
       break;
   }
   if (m.timer_permille >= 0) {
-    level(m.timer_permille, kAccent, kAccentDim);
+    level(m.timer_permille, kOrange, kOrangeDim);
     return r;
   }
   switch (m.screen) {
-    case Screen::Thinking: if (m.animate) comet(24, kBlue); break;
-    case Screen::Responding:
-      if (m.speaking && m.animate) comet(40, kAccent);
+    case Screen::Listening:
+        case Screen::Thinking:
+      if (m.animate) comet(60, kMagenta, kMagentaDim);
       break;
+    case Screen::Responding:
     case Screen::Boot:
-    case Screen::Connecting: if (m.animate) comet(24, kAccent); break;
-    default: break;
+    case Screen::Connecting:
+      if (m.animate) comet(60, kOrange, kOrangeDim);
+      break;
+    default:
+      break;
   }
   return r;
 }
@@ -287,23 +291,9 @@ void draw_face(Canvas& c, int x, int y, const mascot::Bitmap& b, const mascot::F
 // a still mascot never triggers a redraw.
 uint32_t hero_anim_key(const UiModel& m) {
   Hash h;
-  h.val(mascot_frame(m));
+  h.val(m.screen).val(m.animate ? m.frame : 0u).val(m.level / 4).val(m.speaking);
   const mascot::Expression e = expression(m);
   if (e != mascot::Expression::Neutral) h.val(e).val(mark_phase(m));
-  switch (m.screen) {
-    case Screen::Listening: h.val(m.frame % 3).val(m.level / 20); break;
-    case Screen::Thinking:
-      if (e == mascot::Expression::Neutral) h.val((m.frame / 2) % 4);  // the mark takes the dots' place
-      break;
-    case Screen::Connecting:
-      h.val((m.frame / 2) % 4);
-      break;
-    case Screen::Updating:
-      if (m.animate) h.val((m.frame / 2) % 4);
-      break;
-    case Screen::Responding: h.val((m.frame / 2) % 3); break;
-    default: break;
-  }
   return h.get();
 }
 
@@ -321,13 +311,13 @@ uint16_t tone_color(DashRow::Tone t) {
 
 uint16_t caption_color(Screen s) {
   switch (s) {
-    case Screen::Listening: return kGreen;
-    case Screen::Thinking: return kBlue;
+    case Screen::Listening: return kCyan;
+    case Screen::Thinking: return kMagenta;
     case Screen::Responding:
     case Screen::Connecting:
     case Screen::Updating:
     case Screen::Pairing:
-    case Screen::Prompt: return kAccent;
+    case Screen::Prompt: return kOrange;
     case Screen::Offline:
     case Screen::Error: return kRed;
     default: return kText;
@@ -567,7 +557,9 @@ void Ui::draw_frame(const UiModel& m) {
   if ((ring.kind == EdgeRing::Kind::None) != (ring_.kind == EdgeRing::Kind::None)) valid_ = false;
   if (ring != ring_ && display_.framebuffer_rows() > 0) valid_ = false;
   bool ring_moved = valid_ && ring != ring_;
-  const RingBox moved = ring_moved && ring_.kind == EdgeRing::Kind::Comet && ring.kind == EdgeRing::Kind::Comet
+  const bool same_comet = ring_.kind == EdgeRing::Kind::Comet && ring.kind == EdgeRing::Kind::Comet &&
+                          ring_.colour == ring.colour && ring_.track == ring.track;
+  const RingBox moved = ring_moved && same_comet
                             ? comet_box(ring_.head, ring.head)
                             : RingBox{0, 0, static_cast<int16_t>(panel_.width), static_cast<int16_t>(panel_.height)};
   // On the clock only the seconds dot moves from one second to the next: where it was. A new
@@ -1851,67 +1843,17 @@ void Ui::draw_mark(Canvas& c, const UiModel& m, const Rect& r) {
   }
 }
 
-void Ui::hero_anim_rows(const UiModel& m, mascot::Expression was, mascot::Frame was_frame, int& y0,
-                        int& y1) const {
+void Ui::hero_anim_rows(const UiModel& m, mascot::Expression was, mascot::Frame, int& y0, int& y1) const {
   const HeroGeom g = hero_geom(m);
-  const int size = g.size, my = g.y;
+  const int bsize = std::min(g.size, 144);
+  int top = g.y + (g.size - bsize) / 2;
+  int bottom = top + bsize;
   const mascot::Anchors& a = mascot::anchors(m.face);
-  const mascot::Expression now = expression(m);
-  // A colour face's band, as the rows Canvas::picture draws it on at `size`.
-  auto band_rows = [&](mascot::Frame frame, int& lo, int& hi) {
-    if (!m.face || !m.face->rgb565 || !m.face->band(frame).rows) return;
-    const mascot::Band& b = m.face->band(frame);
-    const int px = m.face->px;
-    lo = my + b.y * size / px;
-    hi = my + ((b.y + b.rows) * size + px - 1) / px;
-  };
-  int top = my + size * a.eyes_y0 / 1000, bottom = my + size * a.eyes_y1 / 1000;
-  band_rows(mascot::Frame::Blink, top, bottom);
-  // A step of an expression's mark with the face's frame as it was: the eyes stay out of it.
-  if (now != mascot::Expression::Neutral && now == was && mascot_frame(m) == was_frame) {
-    const Rect r = mark_rect(g, a);
-    top = r.y;
-    bottom = r.y + r.h;
-  }
-  auto add = [&](int lo, int hi) {
-    top = std::min(top, lo);
-    bottom = std::max(bottom, hi);
-  };
-  const int reach = size * 280 / 1000;  // outermost wave radius + stroke
-  switch (m.screen) {
-    case Screen::Listening: {
-      int ey = my + size * a.ear_cup.y / 1000;
-      add(ey - reach, ey + reach);
-      break;
-    }
-    case Screen::Responding: {
-      int mouth = my + size * a.mouth.y / 1000;
-      int lo = my + size * a.mouth_y0 / 1000, hi = my + size * a.mouth_y1 / 1000;
-      band_rows(mascot::Frame::Talk, lo, hi);
-      add(lo, hi);
-      add(mouth - reach, mouth + reach);
-      break;
-    }
-    case Screen::Thinking:
-      if (now != mascot::Expression::Neutral && now == was) break;  // no dots under a mark
-      [[fallthrough]];
-    case Screen::Connecting:
-    case Screen::Updating: {
-      int ty = my + size * a.head_top_right.y / 1000;
-      add(ty - size / 6, ty + size / 12);
-      break;
-    }
-    default: break;
-  }
-  for (mascot::Expression e : {now, was}) {
+  for (mascot::Expression e : {expression(m), was}) {
     if (e == mascot::Expression::Neutral) continue;
     const Rect r = mark_rect(g, a);
-    add(r.y, r.y + r.h);
-    if (e == mascot::Expression::Alert && now != was) {  // the mouth it holds open, as it opens or shuts
-      int lo = my + size * a.mouth_y0 / 1000, hi = my + size * a.mouth_y1 / 1000;
-      band_rows(mascot::Frame::Talk, lo, hi);
-      add(lo, hi);
-    }
+    top = std::min(top, r.y);
+    bottom = std::max(bottom, r.y + r.h);
   }
   y0 = std::max(top - 1, layout_.top_h);
   y1 = std::min(bottom + 2, static_cast<int>(info_.height) - layout_.bottom_h);
@@ -1928,47 +1870,72 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
   const HeroGeom g = hero_geom(m);
   const int size = g.size, mx = g.x, my = g.y;
   const mascot::Anchors& a = mascot::anchors(m.face);
-  const mascot::Bitmap b = mascot::pick(size, mascot_frame(m), m.face);
-  draw_face(c, mx, my, b, m.face, kText);
-  const int stroke = std::max(2, size / 48);
-  auto waves = [&](int cx, int cy, int dir, int lit, int phase, uint16_t on, uint16_t dim, int r0) {
-    for (int i = 0; i < 3; ++i) {
-      int r = size * (r0 + 60 * i) / 1000;
-      uint16_t col = i >= lit ? kFaint : (i == phase ? on : dim);
-      c.arc(cx, cy, r, stroke, dir, col);
-    }
-  };
-  auto dots = [&](uint16_t on, uint16_t dim, bool animate = true) {
-    int r = std::max(2, size / 30);
-    int gap = 3 * r;
-    int tx = mx + size * a.head_top_right.x / 1000;
-    int ty = my + size * a.head_top_right.y / 1000;
-    int active = animate ? static_cast<int>((m.frame / 2) % 4) : -1;
-    for (int i = 0; i < 3; ++i) {
-      c.fill_circle(tx + i * gap, ty - i * gap / 2, r, i == active ? on : dim);
-    }
-  };
+  // Cerchio CooralAI a primitive geometriche (statico in Ready, pulsante negli stati attivi)
+  uint16_t core_col = kCyan, ring_col = kCyanDim;
+  const int bcx = mx + size / 2;
+  const int bcy = my + size / 2;
+  const int max_r = std::min(size, 144) / 2;
+  int r_core = max_r * 42 / 100;
+  int r_ring_in = max_r * 58 / 100;
+  int r_ring_out = max_r * 64 / 100;
+
   switch (m.screen) {
+    case Screen::Ready:
+      core_col = kCyan;
+      ring_col = kCyanDim;
+      break;
+
     case Screen::Listening: {
-      int lit = 1 + std::min(2, m.level / 34);
-      waves(mx + size * a.ear_cup.x / 1000, my + size * a.ear_cup.y / 1000, +1, lit,
-            static_cast<int>(m.frame % 3), kGreen, kGreenDim, 90);
+      core_col = kCyan;
+      ring_col = kCyanDim;
+      const int lvl = std::clamp<int>(m.level, 0, 100);
+      const int boost = (max_r * 32 * lvl) / 10000;
+      r_core += boost / 2;
+      r_ring_in = r_core + std::max(4, max_r / 10) + boost;
+      r_ring_out = r_ring_in + std::max(3, max_r / 16);
       break;
     }
-    case Screen::Responding:
-      if (m.speaking) {
-        // Start outside the face outline so the waves read as sound, not as lines on her cheek.
-        waves(mx + size * a.mouth.x / 1000, my + size * a.mouth.y / 1000, -1, 3,
-              static_cast<int>((m.frame / 2) % 3), kAccent, kAccentDim, 130);
-      }
+
+    case Screen::Thinking: {
+      core_col = kMagenta;
+      ring_col = kMagentaDim;
+      const int pulse = m.animate ? tri(m.frame, 10) : 5;
+      r_core += (max_r * pulse) / 90;
+      r_ring_in = r_core + std::max(5, max_r / 9) + (max_r * pulse) / 45;
+      r_ring_out = r_ring_in + std::max(3, max_r / 14);
       break;
-    case Screen::Thinking:
-      if (expression(m) == mascot::Expression::Neutral) dots(kBlue, kBlueDim);
+    }
+
+    case Screen::Responding: {
+      core_col = kOrange;
+      ring_col = kOrangeDim;
+      const int pulse = (m.animate && m.speaking) ? tri(m.frame, 6) : 2;
+      r_core += (max_r * pulse) / 65;
+      r_ring_in = r_core + std::max(5, max_r / 9) + (max_r * pulse) / 35;
+      r_ring_out = r_ring_in + std::max(3, max_r / 14);
       break;
-    case Screen::Connecting: dots(kAccent, kAccentDim); break;
-    case Screen::Updating: dots(kAccent, kAccentDim, m.animate); break;
-    default: break;
+    }
+
+    case Screen::Offline:
+    case Screen::Error:
+      core_col = rgb565(220, 60, 60);
+      ring_col = rgb565(90, 22, 22);
+      break;
+
+    default:
+      core_col = kOrange;
+      ring_col = kOrangeDim;
+      break;
   }
+
+  r_ring_out = std::min(r_ring_out, max_r);
+  r_ring_in = std::min(r_ring_in, r_ring_out - 2);
+  r_core = std::min(r_core, r_ring_in - 3);
+
+  c.fill_circle(bcx, bcy, r_ring_out, ring_col);
+  c.fill_circle(bcx, bcy, r_ring_in, bg_);
+  c.fill_circle(bcx, bcy, r_core, core_col);
+  
   if (expression(m) != mascot::Expression::Neutral) draw_mark(c, m, mark_rect(g, a));
 
   if (const Rect r = name_rect(m); r.w) {
@@ -2020,10 +1987,10 @@ void Ui::set_ring(const EdgeRing& ring) {
     case EdgeRing::Kind::Comet:
       ring_head64_ = static_cast<int32_t>(ring.head % 360) * 64;
       channels(ring.colour, ring_fg_);
-      channels(bg_, ring_bg_);
+      channels(ring.track ? ring.track : bg_, ring_track_);
       break;
     case EdgeRing::Kind::Ticks: {
-      if (ring.turn64 != tick_turn64_) turn_ticks(ring.turn64);  // a new minute's shift
+      if (ring.turn64 != tick_turn64_) turn_ticks(ring.turn64);
       const double mid = (band_in_ + band_out_ + 1) / 2.0;
       const double theta = kTau * (ring.second * 6 * 64 + ring.turn64) / kTurn64;
       ring_dot_x16_ = static_cast<int32_t>(std::lround(mid * std::sin(theta) * 16));

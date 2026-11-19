@@ -210,13 +210,13 @@ struct EdgeRing {
     Ticks,  // the resting clock: 60 ticks and a `colour` dot at `second`, all turned by `turn64`
   };
   Kind kind = Kind::None;
-  uint16_t colour = 0, dim = 0;
+  uint16_t colour = 0, dim = 0, track = 0;
   int16_t permille = 0;
   uint16_t head = 0;
   uint8_t second = 0;
   int16_t turn64 = 0;  // Ticks: clockwise, with the face's burn-in shift
   bool operator==(const EdgeRing& o) const {
-    return kind == o.kind && colour == o.colour && dim == o.dim && permille == o.permille && head == o.head &&
+    return kind == o.kind && colour == o.colour && dim == o.dim && track == o.track && permille == o.permille && head == o.head &&
            second == o.second && turn64 == o.turn64;
   }
   bool operator!=(const EdgeRing& o) const { return !(*this == o); }
@@ -429,7 +429,7 @@ class Ui {
   EdgeRing ring_;
   ArcSweep ring_sweep_;
   int32_t ring_head64_ = 0;
-  uint8_t ring_fg_[3] = {0, 0, 0}, ring_bg_[3] = {0, 0, 0};
+  uint8_t ring_fg_[3] = {0, 0, 0}, ring_bg_[3] = {0, 0, 0}, ring_track_[3] = {0, 0, 0};
   int32_t ring_dot_x16_ = 0, ring_dot_y16_ = 0, ring_dot_r2_ = 0;
   int16_t tick_cos_[60] = {}, tick_sin_[60] = {};
   int32_t tick_turn64_ = 0;

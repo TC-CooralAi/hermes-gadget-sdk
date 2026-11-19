@@ -11,7 +11,12 @@ namespace {
 // under -700 with x and y each under 500; up is z over -300.
 constexpr int kDownZ = -700, kDownTiltMg = 500, kUpZ = -300;
 constexpr uint32_t kFaceDownMs = 800, kFaceUpMs = 300;
-constexpr uint32_t kMotionStaleMs = 2000;  // a silent sensor never keeps the screen dark
+constexpr uint32_t kMotionStaleMs = 2000;  
+// Shake-to-talk (QMI8658 a 10 Hz con filtro EMA): richiede 2 picchi di jerk >= 1150 mg
+// entro 450 ms, con cooldown di 1,5 s e blocco se il dispositivo è rivolto a faccia in giù.
+constexpr int kShakeJerkMg = 1150;
+constexpr uint32_t kShakeWindowMs = 450, kShakeCooldownMs = 1500;
+// a silent sensor never keeps the screen dark
 // The resting clock's share of the brightness setting: AMOLED care, with a floor
 // so a very low setting keeps the face readable.
 constexpr int kClockPercent = 70;
@@ -385,10 +390,27 @@ bool App::can_sleep_face_down() const {
 bool App::face_down_sleep_enabled() const { return can_sleep_face_down() && face_down_sleep_; }
 
 void App::on_motion(int16_t x_mg, int16_t y_mg, int16_t z_mg) {
-  motion_[0] = x_mg;
-  motion_[1] = y_mg;
-  motion_[2] = z_mg;
-  motion_at_ = now();
+  const uint32_t t = now() | 1u;
+  if (motion_seen_ && (t - motion_at_) <= 300) {
+    const int jerk = std::abs(x_mg - prev_motion_[0]) + std::abs(y_mg - prev_motion_[1]) +
+                     std::abs(z_mg - prev_motion_[2]);
+    if (jerk >= kShakeJerkMg && z_mg > -500 && !face_down_ &&
+        (!shake_cooldown_until_ || static_cast<int32_t>(t - shake_cooldown_until_) >= 0)) {
+      if (!shake_window_at_ || (t - shake_window_at_) > kShakeWindowMs) {
+        shake_window_at_ = t;
+        shake_hits_ = 1;
+      } else if (++shake_hits_ >= 2) {
+        shake_hits_ = 0;
+        shake_window_at_ = 0;
+        shake_cooldown_until_ = t + kShakeCooldownMs;
+        shake_triggered_ = true;
+      }
+    }
+  }
+  prev_motion_[0] = motion_[0] = x_mg;
+  prev_motion_[1] = motion_[1] = y_mg;
+  prev_motion_[2] = motion_[2] = z_mg;
+  motion_at_ = t;
   motion_seen_ = true;
 }
 
@@ -398,6 +420,8 @@ void App::motion_tick() {
   if (now() - motion_at_ > kMotionStaleMs) {
     // The sensor stopped reporting: never stay dark on old data.
     down_since_ = up_since_ = 0;
+    shake_hits_ = 0;
+    shake_triggered_ = false;
     if (face_down_) leave_face_down();
     return;
   }
@@ -407,9 +431,21 @@ void App::motion_tick() {
   down_since_ = down ? (down_since_ ? down_since_ : t) : 0;
   up_since_ = up ? (up_since_ ? up_since_ : t) : 0;
   if (face_down_) {
+    shake_triggered_ = false;
     if (!face_down_sleep_enabled() || (up_since_ && t - up_since_ >= kFaceUpMs)) leave_face_down();
   } else if (face_down_sleep_enabled() && down_since_ && t - down_since_ >= kFaceDownMs) {
+    shake_triggered_ = false;
     enter_face_down();
+  } else if (shake_triggered_) {
+    shake_triggered_ = false;
+    if (!settings_open() && !alarm_ && mode_ == Mode::Idle) {
+      wake_display();
+      close_notices_for_input();
+      if (can_talk()) {
+        log(LogLevel::Info, "shake-to-talk triggered");
+        start_listening(true);
+      }
+    }
   }
 }
 
